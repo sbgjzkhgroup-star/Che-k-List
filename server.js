@@ -42,7 +42,7 @@ const UP_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
 const UP_KEY = 'checklist_db';
 const useUpstash = !!(UP_URL && UP_TOKEN);
 
-let db = { shifts: {}, expenses: {}, users: {}, sent: {}, schedule: { staff: [], offs: {} } };
+let db = { shifts: {}, expenses: {}, users: {}, sent: {}, schedule: { staff: [], offs: {}, days: [4, 5, 6] } };
 async function loadDb() {
   try {
     if (useUpstash) {
@@ -60,6 +60,7 @@ async function loadDb() {
   db.schedule = db.schedule || {};
   db.schedule.staff = db.schedule.staff || [];
   db.schedule.offs = db.schedule.offs || {};
+  if (!Array.isArray(db.schedule.days) || !db.schedule.days.length) db.schedule.days = [4, 5, 6]; // по умолчанию пт, сб, вс
 }
 let saveChain = Promise.resolve();
 function save() {
@@ -109,24 +110,27 @@ const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.pa
 const mondayOf = date => shiftDate(date, -((new Date(date + 'T00:00:00Z').getUTCDay() + 6) % 7));
 const mod = (n, m) => ((n % m) + m) % m;
 
-// Выходные одной недели w (номер недели от якоря). Смещения от понедельника: 4 = пт, 5 = сб, 6 = вс.
-// Правила: выходные только пт/сб/вс (пн–чт все на смене); у каждого один выходной в неделю,
+// Выходные одной недели w (номер недели от якоря). Дни считаем от понедельника: 0 = пн ... 6 = вс.
+// days — дни, в которые разрешено давать выходные (по умолчанию пт/сб/вс); в остальные все на смене.
+// У каждого один выходной в неделю,
 // у отмеченных «раз в 2 недели» — один в две недели; те, у кого включено «чередовать воскресенье»,
 // по очереди берут воскресенье, остальные дни стараемся распределить поровну.
-function genWeek(w, staff) {
+function genWeek(w, staff, days) {
   const res = {};
-  const counts = { 4: 0, 5: 0, 6: 0 };
+  const counts = {};
+  days.forEach(d => { counts[d] = 0; });
   const add = (off, id) => { (res[off] = res[off] || []).push(id); counts[off]++; };
   const bi = staff.filter(s => s.biweekly);
   const need = staff.filter(s => !s.biweekly || mod(w + bi.indexOf(s), 2) === 0);
   const church = need.filter(s => s.church);
-  const designated = church.length ? church[mod(w, church.length)] : null;
+  const designated = days.includes(6) && church.length ? church[mod(w, church.length)] : null;
   if (designated) add(6, designated.id);
   const rest = need.filter(s => s !== designated);
   const rot = list => { const r = list.length ? mod(w, list.length) : 0; return list.slice(r).concat(list.slice(0, r)); };
   const ordered = rot(rest.filter(s => s.church)).concat(rot(rest.filter(s => !s.church)));
   ordered.forEach((s, i) => {
-    const allowed = s.church ? [4, 5] : [4, 5, 6];
+    let allowed = s.church ? days.filter(d => d !== 6) : days;
+    if (!allowed.length) allowed = days;
     const min = Math.min(...allowed.map(d => counts[d]));
     const c = allowed.filter(d => counts[d] === min);
     add(c[mod(w + i, c.length)], s.id);
@@ -139,7 +143,7 @@ function generateSchedule(fromDate, weeks) {
   for (let k = 0; k < weeks; k++) {
     const monday = shiftDate(from, 7 * k);
     const w = Math.floor(daysBetween(SCHED_ANCHOR, monday) / 7);
-    const res = genWeek(w, sch.staff);
+    const res = genWeek(w, sch.staff, sch.days);
     for (const off of Object.keys(res)) sch.offs[shiftDate(monday, Number(off))] = res[off];
   }
 }
@@ -287,7 +291,7 @@ const server = http.createServer(async (req, res) => {
       out.schedule = {
         // признаки «раз в 2 недели» и «чередовать воскресенье» видит только владелец
         staff: sch.staff.map(s => me.role === 'owner' ? s : { id: s.id, name: s.name }),
-        offs: sch.offs, myId: mine ? mine.id : null
+        offs: sch.offs, days: sch.days, myId: mine ? mine.id : null
       };
       if (me.role === 'owner') {
         const linked = new Set(sch.staff.map(s => s.tg).filter(Boolean));
@@ -403,6 +407,13 @@ const server = http.createServer(async (req, res) => {
       let list = (sch.offs[b.date] || []).filter(id => id !== b.staffId);
       if (b.off) list.push(b.staffId);
       if (list.length) sch.offs[b.date] = list; else delete sch.offs[b.date];
+      save();
+      return send(res, 200, { ok: true });
+    }
+    if (op === 'days') {
+      const days = Array.isArray(b.days) ? [...new Set(b.days.map(Number))].filter(d => Number.isInteger(d) && d >= 0 && d <= 6).sort() : [];
+      if (!days.length) return send(res, 400, { error: 'bad days' });
+      sch.days = days;
       save();
       return send(res, 200, { ok: true });
     }
