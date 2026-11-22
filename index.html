@@ -360,17 +360,19 @@ function renderSched() {
   h += '<h2>Сотрудники</h2><div class="card sec" style="padding:4px 0">';
   if (!sc.staff.length) h += '<div class="free" style="padding:12px 16px">Пока никого. Добавьте ниже.</div>';
   sc.staff.forEach(s => {
-    h += `<div class="stf"><div class="nmx">${esc(s.name)}<small>${s.tg ? '🔗 видит свой график в Telegram' : 'без привязки к Telegram'}</small></div>
+    h += `<div class="stf"><div class="nmx">${esc(s.name)}<small>${s.tg ? '🔗 видит свой график в Telegram' : 'только имя в графике'}</small></div>
       <button class="opt ${s.biweekly ? 'on' : ''}" data-st-flag="${s.id}|biweekly">Раз в 2 недели</button>
       <button class="opt ${s.church ? 'on' : ''}" data-st-flag="${s.id}|church">Вс по очереди</button>
       <button class="x" data-st-del="${s.id}" style="border:0;background:var(--bg2);color:var(--muted);width:30px;height:30px;border-radius:10px;cursor:pointer">✕</button></div>`;
   });
   h += '</div>';
   h += `<div class="card form"><b>Добавить сотрудника</b>
-    <select id="stUser"><option value="">Выбрать из тех, кто уже открывал приложение</option>${(sc.users || []).map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>
-    <input id="stName" placeholder="Имя в графике" maxlength="30" autocomplete="off">
+    <input id="stName" placeholder="Имя сотрудника" maxlength="30" autocomplete="off">
     <button class="btn" data-st-add="1">Добавить</button>
-    <div class="muted" style="font-size:12.5px">Если выбрать человека из списка, он увидит в приложении свой выходной. Сотрудник появляется в списке после первого входа в приложение.</div></div>`;
+    <div class="muted" style="font-size:12.5px">Достаточно вписать имя. Сотруднику не нужно заходить в приложение, выходные вы выставляете сами.</div>
+    ${(sc.users || []).length ? `<details id="stDet" ${S.stOpen ? 'open' : ''} style="font-size:13px"><summary class="muted" style="cursor:pointer">Привязать к Telegram (необязательно)</summary>
+      <select id="stUser" style="margin-top:10px"><option value="">Не привязывать</option>${sc.users.map(u => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>
+      <div class="muted" style="font-size:12.5px;margin-top:8px">Если человек открывал приложение, его можно выбрать из списка: тогда он увидит свой выходной у себя в телефоне.</div></details>` : ''}</div>`;
   h += `<div class="card"><b>Составить график автоматически</b>
     <div class="muted" style="font-size:13px;margin:8px 0 12px;line-height:1.45">Выходные только в пт, сб и вс, с понедельника по четверг работают все. Один выходной в неделю, у отмеченных «раз в 2 недели» — один в две недели. Отмеченные «вс по очереди» по очереди берут воскресенье. График составится с этой недели на 8 недель вперёд, ваши ручные правки на эти недели будут заменены.</div>
     <button class="btn" style="width:100%" data-st-gen="1">Составить на 8 недель</button></div>`;
@@ -584,11 +586,12 @@ function toggleOff(d, id, off) {
 }
 function addStaff() {
   const sel = document.getElementById('stUser'), inp = document.getElementById('stName');
-  const tgId = sel.value, name = (inp.value.trim() || (sel.selectedOptions[0] && tgId ? sel.selectedOptions[0].textContent : '')).trim();
+  const tgId = sel ? sel.value : '', name = (inp.value.trim() || (sel && sel.selectedOptions[0] && tgId ? sel.selectedOptions[0].textContent : '')).trim();
   if (!name) { toast('Напишите имя или выберите из списка'); return; }
   schedCall('staff', { op: 'add', name, tg: tgId || null, biweekly: false, church: false }, 'Сотрудник добавлен ✓');
 }
 // сумма с пробелами между разрядами и Enter для быстрой отправки
+$app.addEventListener('toggle', e => { if (e.target.id === 'stDet') S.stOpen = e.target.open; }, true);
 $app.addEventListener('change', e => {
   if (e.target.id === 'stUser') {
     const o = e.target.selectedOptions[0], inp = document.getElementById('stName');
